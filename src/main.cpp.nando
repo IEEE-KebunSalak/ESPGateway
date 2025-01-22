@@ -34,6 +34,7 @@ typedef struct gpsPayload
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 RHReliableDatagram manager(rf95, GW_ID);
 uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+uint8_t len = sizeof(buf);
 
 // payloads
 GpsPayload gpsPayload;
@@ -72,13 +73,14 @@ void setup()
     digitalWrite(RFM95_RST, HIGH);
     delay(10);
 
-    if (!manager.init())
+    if (!rf95.init())
     {
         Serial.println(F("[LoRa]: RFM95 radio init failed"));
         while (1)
             ;
     }
     Serial.println(F("[LoRa]: RFM95 radio init OK!"));
+
     if (!rf95.setFrequency(RFM95_FREQ))
     {
         Serial.println(F("[LoRa]: setFrequency failed"));
@@ -87,12 +89,12 @@ void setup()
     }
 
     rf95.setTxPower(23, false);
-    // rf95.setThisAddress(GW_ID);
-    // rf95.setModeRx();
+    rf95.setThisAddress(GW_ID);
+    rf95.setModeRx();
     rf95.setModemConfig(RH_RF95::Bw125Cr48Sf4096);
-    // manager.setThisAddress(GW_ID);
+
     rf95.setPayloadCRC(true);
-    // rf95.setPromiscuous(true);
+
     manager.setRetries(0);
 
     // wifi setup
@@ -120,11 +122,13 @@ void loop()
 {
 
     // read lora incoming packets
-    if (manager.available())
+    if (rf95.available())
     {
-        uint8_t len = sizeof(buf);
-        if (manager.recvfrom(buf, &len))
+        if (manager.recvfromAck(buf, &len))
         {
+            // check wifi connection first
+            checkConnection();
+
             // turn on led
             digitalWrite(LED_BUILTIN, HIGH);
 
@@ -147,12 +151,10 @@ void loop()
                 doc["node_id"] = gpsPayload.id;
                 doc["latitude"] = gpsPayload.latitude;
                 doc["longitude"] = gpsPayload.longitude;
-                doc["snr"] = rf95.lastSNR();
-                doc["rssi"] = rf95.lastRssi();
 
                 String json = doc.as<String>();
 
-                // Serial.println(json);
+                Serial.println(json);
 
                 int code = http.POST(json);
 
@@ -170,7 +172,7 @@ void loop()
 
                 http.end();
             }
-            else
+            else if (len == sizeof(Payload))
             {
                 Serial.println(", received payload packet");
 
@@ -189,12 +191,10 @@ void loop()
                 doc["humidity"] = payload.humidity;
                 doc["light"] = payload.lux;
                 doc["tip"] = payload.tips;
-                doc["snr"] = rf95.lastSNR();
-                doc["rssi"] = rf95.lastRssi();
 
                 String json = doc.as<String>();
 
-                // Serial.println(json);
+                Serial.println(json);
 
                 int code = http.POST(json);
 
@@ -212,26 +212,25 @@ void loop()
 
                 http.end();
             }
+            else
+            {
+                Serial.println(F("[LoRa]: Ignoring unknown packet"));
+            }
 
             // reset buffer
             memset(buf, 0, sizeof(buf));
 
+            // reset len
+            len = sizeof(buf);
+
             // turn off led
             digitalWrite(LED_BUILTIN, LOW);
-        }
-        else
-        {
-            Serial.println(F("[LoRa]: Receive failed"));
         }
     }
 
     // check for update every n minutes
     if (millis() - lastCheckUpdate > OTA_CHECK_INTERVAL)
     {
-
-        // check wifi connection first
-        checkConnection();
-
         Serial.println(F("[System]: Checking for update"));
         checkUpdate();
         lastCheckUpdate = millis();

@@ -34,6 +34,7 @@ typedef struct gpsPayload
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 RHReliableDatagram manager(rf95, GW_ID);
 uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+uint8_t len = sizeof(buf);
 
 // payloads
 GpsPayload gpsPayload;
@@ -72,13 +73,14 @@ void setup()
     digitalWrite(RFM95_RST, HIGH);
     delay(10);
 
-    if (!manager.init())
+    if (!rf95.init())
     {
         Serial.println(F("[LoRa]: RFM95 radio init failed"));
         while (1)
             ;
     }
     Serial.println(F("[LoRa]: RFM95 radio init OK!"));
+
     if (!rf95.setFrequency(RFM95_FREQ))
     {
         Serial.println(F("[LoRa]: setFrequency failed"));
@@ -87,12 +89,12 @@ void setup()
     }
 
     rf95.setTxPower(23, false);
-    // rf95.setThisAddress(GW_ID);
-    // rf95.setModeRx();
+    rf95.setThisAddress(GW_ID);
+    rf95.setModeRx();
     rf95.setModemConfig(RH_RF95::Bw125Cr48Sf4096);
-    // manager.setThisAddress(GW_ID);
+
     rf95.setPayloadCRC(true);
-    // rf95.setPromiscuous(true);
+
     manager.setRetries(0);
 
     // wifi setup
@@ -120,11 +122,13 @@ void loop()
 {
 
     // read lora incoming packets
-    if (manager.available())
+    if (rf95.available())
     {
-        uint8_t len = sizeof(buf);
-        if (manager.recvfrom(buf, &len))
+        if (manager.recvfromAck(buf, &len))
         {
+            // check wifi connection first
+            checkConnection();
+
             // turn on led
             digitalWrite(LED_BUILTIN, HIGH);
 
@@ -138,100 +142,110 @@ void loop()
                 // gpsPayload = (GpsPayload *)buf;
                 memcpy(&gpsPayload, buf, sizeof(GpsPayload));
 
-                // send post request to server
-                http.begin(client, URL_DISTRESS);
-                http.addHeader("Content-Type", "application/json");
+                Serial.print("node_id: ");
+                Serial.println(gpsPayload.id);
 
-                doc.clear();
+                Serial.print("latitude: ");
+                Serial.println(gpsPayload.latitude, 6);
 
-                doc["node_id"] = gpsPayload.id;
-                doc["latitude"] = gpsPayload.latitude;
-                doc["longitude"] = gpsPayload.longitude;
-                doc["snr"] = rf95.lastSNR();
-                doc["rssi"] = rf95.lastRssi();
+                Serial.print("longitude: ");
+                Serial.println(gpsPayload.longitude, 6);
 
-                String json = doc.as<String>();
+                // lora debug
+                Serial.print("RSSI: ");
+                Serial.println(rf95.lastRssi(), DEC);
 
-                // Serial.println(json);
-
-                int code = http.POST(json);
-
-                Serial.println("Distress HTTP code: " + String(code));
-                // Serial.println("Distress HTTP response: " + http.getString());
-
-                if (code == HTTP_CODE_OK || code == HTTP_CODE_CREATED)
-                {
-                    Serial.println(F("[HTTP]: POST request success"));
-                }
-                else
-                {
-                    Serial.println(F("[HTTP]: POST request failed..."));
-                }
-
-                http.end();
+                Serial.print("SNR: ");
+                Serial.println(rf95.lastSNR(), DEC);
             }
-            else
+            else if (len == sizeof(Payload))
             {
                 Serial.println(", received payload packet");
 
                 // payload = (Payload *)buf;
                 memcpy(&payload, buf, sizeof(Payload));
 
-                // send post request to server
-                http.begin(client, URL);
-                http.addHeader("Content-Type", "application/json");
-                // int code = http.POST("{\"node_id\": " + String(payload.id) + ", \"temperature\": " + String(payload.temperature) + ", \"humidity\": " + String(payload.humidity) + ", \"light\": " + String(payload.lux) + ", \"tip\": " + String(payload.tips) + "}");
+                // // send post request to server
+                // http.begin(client, URL);
+                // http.addHeader("Content-Type", "application/json");
+                // // int code = http.POST("{\"node_id\": " + String(payload.id) + ", \"temperature\": " + String(payload.temperature) + ", \"humidity\": " + String(payload.humidity) + ", \"light\": " + String(payload.lux) + ", \"tip\": " + String(payload.tips) + "}");
 
-                doc.clear();
+                // doc.clear();
 
-                doc["node_id"] = payload.id;
-                doc["temperature"] = payload.temperature;
-                doc["humidity"] = payload.humidity;
-                doc["light"] = payload.lux;
-                doc["tip"] = payload.tips;
-                doc["snr"] = rf95.lastSNR();
-                doc["rssi"] = rf95.lastRssi();
+                // doc["node_id"] = payload.id;
+                // doc["temperature"] = payload.temperature;
+                // doc["humidity"] = payload.humidity;
+                // doc["light"] = payload.lux;
+                // doc["tip"] = payload.tips;
 
-                String json = doc.as<String>();
+                // String json = doc.as<String>();
 
                 // Serial.println(json);
 
-                int code = http.POST(json);
+                // int code = http.POST(json);
 
-                Serial.println("Payload HTTP response code: " + String(code));
-                // Serial.println("Payload HTTP response: " + http.getString());
+                // Serial.println("Payload HTTP response code: " + String(code));
+                // // Serial.println("Payload HTTP response: " + http.getString());
 
-                if (code == HTTP_CODE_OK || code == HTTP_CODE_CREATED)
-                {
-                    Serial.println(F("[HTTP]: POST request success"));
-                }
-                else
-                {
-                    Serial.println(F("[HTTP]: POST request failed"));
-                }
+                // if (code == HTTP_CODE_OK || code == HTTP_CODE_CREATED)
+                // {
+                //     Serial.println(F("[HTTP]: POST request success"));
+                // }
+                // else
+                // {
+                //     Serial.println(F("[HTTP]: POST request failed"));
+                // }
 
-                http.end();
+                // http.end();
+
+                Serial.print("node_id: ");
+                Serial.println(payload.id);
+
+                Serial.print("temperature: ");
+                Serial.println(payload.temperature);
+
+                Serial.print("humidity: ");
+                Serial.println(payload.humidity);
+
+                Serial.print("light: ");
+                Serial.println(payload.lux);
+
+                Serial.print("tip: ");
+                Serial.println(payload.tips);
+
+                // lora debug
+                Serial.print("RSSI: ");
+                Serial.println(rf95.lastRssi(), DEC);
+
+                Serial.print("SNR: ");
+                Serial.println(rf95.lastSNR(), DEC);
+            }
+            else
+            {
+                Serial.println(F("[LoRa]: Ignoring unknown packet"));
+
+                // lora debug
+                Serial.print("RSSI: ");
+                Serial.println(rf95.lastRssi(), DEC);
+
+                Serial.print("SNR: ");
+                Serial.println(rf95.lastSNR(), DEC);
             }
 
             // reset buffer
             memset(buf, 0, sizeof(buf));
 
+            // reset len
+            len = sizeof(buf);
+
             // turn off led
             digitalWrite(LED_BUILTIN, LOW);
-        }
-        else
-        {
-            Serial.println(F("[LoRa]: Receive failed"));
         }
     }
 
     // check for update every n minutes
     if (millis() - lastCheckUpdate > OTA_CHECK_INTERVAL)
     {
-
-        // check wifi connection first
-        checkConnection();
-
         Serial.println(F("[System]: Checking for update"));
         checkUpdate();
         lastCheckUpdate = millis();

@@ -1,0 +1,147 @@
+/* LORA Receiver for ESP32 - TESTBED*/
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <RH_RF95.h>
+#include <RHReliableDatagram.h>
+
+#include <WiFi.h>
+#include <Update.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+
+// pinout and configuration
+#include <pinout.h>
+// #include <config.h>
+
+/* CONFIGS */
+#define GW_ID 5
+
+typedef struct payload
+{
+    uint8_t id;
+    float temperature;
+    float humidity;
+    float lux;
+    uint32_t tips;
+} Payload;
+
+typedef struct gpsPayload
+{
+    uint8_t id;
+    double latitude;
+    double longitude;
+} GpsPayload;
+
+RH_RF95 rf95(RFM95_CS, RFM95_INT);
+RHReliableDatagram manager(rf95, GW_ID);
+uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+
+// payloads
+GpsPayload gpsPayload;
+Payload payload;
+
+void setup()
+{
+    Serial.begin(9600);
+    setCpuFrequencyMhz(80);
+
+    Serial.println(F("[System]: Salak ESPGateway QA"));
+    Serial.println("[System]: Gateway ID: " + String(GW_ID));
+    Serial.println("[System]: CPU Frequency: " + String(ESP.getCpuFreqMHz()) + " MHz");
+
+    // pin led
+    pinMode(LED_BUILTIN, OUTPUT);
+
+    // LoRa setup
+    pinMode(RFM95_RST, OUTPUT);
+    digitalWrite(RFM95_RST, HIGH);
+    delay(10);
+    digitalWrite(RFM95_RST, LOW);
+    delay(10);
+    digitalWrite(RFM95_RST, HIGH);
+    delay(10);
+
+    if (!manager.init())
+    {
+        Serial.println(F("[LoRa]: RFM95 radio init failed"));
+        while (1)
+            ;
+    }
+    Serial.println(F("[LoRa]: RFM95 radio init OK!"));
+    if (!rf95.setFrequency(RFM95_FREQ))
+    {
+        Serial.println(F("[LoRa]: setFrequency failed"));
+        while (1)
+            ;
+    }
+
+    rf95.setTxPower(23, false);
+    // rf95.setThisAddress(GW_ID);
+    // rf95.setModeRx();
+    rf95.setModemConfig(RH_RF95::Bw125Cr48Sf4096);
+    // manager.setThisAddress(GW_ID);
+    rf95.setPayloadCRC(true);
+    // rf95.setPromiscuous(true);
+    manager.setRetries(0);
+}
+
+void loop()
+{
+
+    // read lora incoming packets
+    if (manager.available())
+    {
+        uint8_t len = sizeof(buf);
+        if (manager.recvfrom(buf, &len))
+        {
+            // turn on led
+            digitalWrite(LED_BUILTIN, HIGH);
+
+            Serial.print(F("[LoRa]: Received packet from node"));
+
+            // check if incoming struct is same as formatted
+            if (len == sizeof(GpsPayload))
+            {
+                // gpsPayload = (GpsPayload *)buf;
+                memcpy(&gpsPayload, buf, sizeof(GpsPayload));
+
+                Serial.println(", received gps packet");
+                Serial.println("===========================================");
+                Serial.println("Node ID: " + String(gpsPayload.id));
+                Serial.println("Latitude: " + String(gpsPayload.latitude));
+                Serial.println("Longitude: " + String(gpsPayload.longitude));
+                Serial.println("RSSI: " + String(rf95.lastRssi()));
+                Serial.println("SNR: " + String(rf95.lastSNR()));
+                Serial.println("===========================================");
+            }
+            else
+            {
+                Serial.println(", received payload packet");
+
+                // payload = (Payload *)buf;
+                memcpy(&payload, buf, sizeof(Payload));
+
+                Serial.println("===========================================");
+                Serial.println("Node ID: " + String(payload.id));
+                Serial.println("Temperature: " + String(payload.temperature));
+                Serial.println("Humidity: " + String(payload.humidity));
+                Serial.println("Lux: " + String(payload.lux));
+                Serial.println("Tips: " + String(payload.tips));
+                Serial.println("RSSI: " + String(rf95.lastRssi()));
+                Serial.println("SNR: " + String(rf95.lastSNR()));
+                Serial.println("===========================================");
+            }
+
+            // reset buffer
+            memset(buf, 0, sizeof(buf));
+
+            // turn off led
+            digitalWrite(LED_BUILTIN, LOW);
+        }
+        else
+        {
+            Serial.println(F("[LoRa]: Receive failed"));
+        }
+    }
+}

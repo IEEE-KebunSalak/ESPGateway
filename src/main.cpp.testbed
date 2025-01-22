@@ -1,4 +1,4 @@
-/* LORA Receiver for ESP32*/
+/* LORA Receiver for ESP32 - TESTBED*/
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -10,10 +10,24 @@
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <base64.h>
+
+#include <ESPNtpClient.h>
 
 // pinout and configuration
 #include <pinout.h>
-#include <config.h>
+// #include <config.h>
+
+/* CONFIGS */
+#define GW_ID 4
+
+#define URL "http://playground.mysalak.com/testbed/nando/gateway"
+#define URL_DISTRESS "http://node.mysalak.com/node/notify-admin2"
+
+#define CURRENT_VERSION 3005 // 3000 testbed
+
+#define URL_OTA "http://ota.mysalak.com/ota"
+#define OTA_CHECK_INTERVAL 60000
 
 typedef struct payload
 {
@@ -44,6 +58,8 @@ WiFiClient client;
 HTTPClient http;
 JsonDocument doc;
 
+base64 b;
+
 uint32_t lastCheckUpdate = 0;
 
 void checkConnection();
@@ -55,7 +71,7 @@ void setup()
     Serial.begin(9600);
     setCpuFrequencyMhz(80);
 
-    Serial.println(F("[System]: Salak ESPGateway v1"));
+    Serial.println(F("[System]: Salak ESPGateway testbed"));
     Serial.println("[System]: Firmware version: " + String(CURRENT_VERSION));
     Serial.println("[System]: Gateway ID: " + String(GW_ID));
     Serial.println("[System]: CPU Frequency: " + String(ESP.getCpuFreqMHz()) + " MHz");
@@ -114,6 +130,10 @@ void setup()
         // if you get here you have connected to the WiFi
         Serial.println(F("[WiFi]: Connected to WiFi"));
     }
+
+    NTP.setTimeZone(TZ_Etc_GMTp7);
+    NTP.begin();
+    NTP.millis();
 }
 
 void loop()
@@ -133,10 +153,14 @@ void loop()
             // check if incoming struct is same as formatted
             if (len == sizeof(GpsPayload))
             {
+                time_t receivedAt = NTP.millis();
                 Serial.println(", received GPS distress packet");
 
                 // gpsPayload = (GpsPayload *)buf;
                 memcpy(&gpsPayload, buf, sizeof(GpsPayload));
+
+                time_t beforeAPIHit = NTP.millis();
+                ;
 
                 // send post request to server
                 http.begin(client, URL_DISTRESS);
@@ -149,6 +173,8 @@ void loop()
                 doc["longitude"] = gpsPayload.longitude;
                 doc["snr"] = rf95.lastSNR();
                 doc["rssi"] = rf95.lastRssi();
+                doc["receivedAt"] = receivedAt;
+                doc["beforeAPIHit"] = beforeAPIHit;
 
                 String json = doc.as<String>();
 
@@ -185,16 +211,16 @@ void loop()
                 doc.clear();
 
                 doc["node_id"] = payload.id;
+                doc["gateway_id"] = GW_ID;
                 doc["temperature"] = payload.temperature;
                 doc["humidity"] = payload.humidity;
-                doc["light"] = payload.lux;
-                doc["tip"] = payload.tips;
+                doc["lux"] = payload.lux;
+                doc["tips"] = payload.tips;
                 doc["snr"] = rf95.lastSNR();
                 doc["rssi"] = rf95.lastRssi();
+                doc["raw"] = b.encode(buf, sizeof(Payload));
 
                 String json = doc.as<String>();
-
-                // Serial.println(json);
 
                 int code = http.POST(json);
 
